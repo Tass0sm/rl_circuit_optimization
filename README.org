@@ -1,0 +1,8 @@
+1. [cite:@foselQuantumCircuitOptimization2021]
+2. [cite:@moroQuantumCompilingDeep2021]
+3. [cite:@shiResourceEfficientQuantumComputing2020]
+4. [cite:@tanOptimalityStudyExisting2021]
+
+
+* Resources
+https://di-engine-docs.readthedocs.io/en/latest/04_best_practice/ding_env.html
