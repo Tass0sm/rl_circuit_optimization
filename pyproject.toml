@@ -8,8 +8,9 @@ packages = [{include = "final_project"}]
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.12"
-rl4circopt = {path = "/home/tassos/research/google-research/rl4circopt"}
-di-engine = "^0.4.7"
+ray = {extras = ["rllib"], version = "^2.3.1"}
+torch = "^2.0.0"
+qiskit = "^0.42.1"
 
 
 [build-system]

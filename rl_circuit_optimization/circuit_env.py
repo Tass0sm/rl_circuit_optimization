@@ -1,32 +1,86 @@
-from ding.envs import BaseEnvTimestep
+import gymnasium as gym
 
-class QuantumCircuitEnv(BaseEnv):
+from enum import Enum
+from ray.rllib.env.env_context import EnvContext
+from gymnasium.spaces import Discrete, Graph, GraphInstance
 
-    def __init__(self, cfg: dict) -> None:
-        self._cfg = cfg
-        self._init_flag = False
+from qiskit.circuit.random import random_circuit
+from qiskit.dagcircuit import DAGOpNode
+from qiskit.converters.circuit_to_dag import circuit_to_dag
+from qiskit.transpiler.passes.optimization.commutative_cancellation import CommutativeCancellation
 
-    def reset(self) -> np.ndarray:
-        if not self._init_flag:
-            self._env = self._make_env(only_info=False)
-            self._init_flag = True
-        if hasattr(self, '_seed') and hasattr(self, '_dynamic_seed') and self._dynamic_seed:
-            np_seed = 100 * np.random.randint(1, 1000)
-            self._env.seed(self._seed + np_seed)
-        elif hasattr(self, '_seed'):
-            self._env.seed(self._seed)
-        obs = self._env.reset()
-        obs = to_ndarray(obs)
-        self._eval_episode_return = 0.
-        return obs
+BASIS_GATES=["u", "id", "csx", "measure"]
+CIRCUIT_TRANSFORMATIONS=[CommutativeCancellation]
 
-    def step(self, action: np.ndarray) -> BaseEnvTimestep:
-        assert isinstance(action, np.ndarray), type(action)
-        action = action.item()
-        obs, rew, done, info = self._env.step(action)
-        self._eval_episode_return += rew
-        obs = to_ndarray(obs)
-        rew = to_ndarray([rew])  # Transformed to an array with shape (1, )
-        if done:
-            info['eval_episode_return'] = self._eval_episode_return
-        return BaseEnvTimestep(obs, rew, done, info)
+class QuantumCircuit(gym.Env):
+    """RL environment for quantum circuits.
+
+    Observation Space:
+    Graph of Circuit
+    1. Nodes are the operations
+    2. Edges are wires labels
+
+    Still no parameters are included in the gate representation.
+
+    Actions: Circuit Transformations
+
+    """
+    def __init__(self, config: EnvContext):
+
+
+        # Z-Rotation, Phased-X and Controlled-Not (CNOT) gates.
+        # gate_space = Discrete(3)
+        # gate_space = Box(low=-100, high=100, shape=(3,))
+        self._depth = 2
+
+        num_basis_gates = len(BASIS_GATES)
+        # an identifier for any item in the graph
+        gate_space = Discrete(num_basis_gates)
+        # a binary label for to distinguish wires coming into a two-qubit gate
+        edge_space = Discrete(self._depth)
+        self._gate_type_to_name = dict(zip(BASIS_GATES, range(num_basis_gates)))
+        self.observation_space = Graph(node_space=gate_space, edge_space=edge_space)
+
+        num_transformations = len(CIRCUIT_TRANSFORMATIONS)
+        self._action_type_to_class = dict(zip(range(num_transformations), CIRCUIT_TRANSFORMATIONS))
+        self.action_space = Discrete(num_transformations)
+
+    def _encode_circuit_dag(self, circuit_dag):
+        op_nodes = circuit_dag.op_nodes()
+        op_node_type_names = [node.op.name for node in op_nodes]
+        op_node_types = [self._gate_type_to_name[n] for n in op_node_type_names]
+
+        is_between_ops = lambda a: isinstance(a[0], DAGOpNode) and isinstance(a[1], DAGOpNode)
+        edges = list(filter(is_between_ops, circuit_dag.edges(nodes=op_nodes)))
+        index_edges = [[op_nodes.index(a), op_nodes.index(b)] for a, b, _ in edges]
+
+        def get_edge_wire(e):
+            s1 = set(e[0].qargs)
+            s2 = set(e[1].qargs)
+            qubit = s1.intersection(s2).pop()
+            return circuit.find_bit(qubit).index
+
+        edge_wires = list(map(get_edge_wire, edges))
+
+        return {
+            "nodes": op_node_types,
+            "edges": edge_wires,
+            "edge_links": index_edges
+        }
+
+    def reset(self, *, seed=None, options=None):
+        "Starts a new episode by randomly generating a new circuit. Returns the
+        first agent observation, which is the circuit dag encoded as a member of
+        the observation space. Also returns metrics (TODO)"
+
+        # We need the following line to seed self.np_random
+        super().reset(seed=seed)
+
+        self.circuit = random_circuit(2, 2, measure=True)
+        self.circuit_dag = circuit_to_dag(self.circuit)
+
+        o = self._encode_circuit_dag(self.circuit_dag)
+        return o, {}
+
+    def step(self, action):
+        pass
