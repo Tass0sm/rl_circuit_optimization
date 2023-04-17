@@ -68,6 +68,10 @@ class QuantumCircuit(gym.Env):
             "edge_links": index_edges
         }
 
+    def _get_info(self):
+        # TODO
+        return {}
+
     def reset(self, *, seed=None, options=None):
         "Starts a new episode by randomly generating a new circuit. Returns the
         first agent observation, which is the circuit dag encoded as a member of
@@ -80,7 +84,22 @@ class QuantumCircuit(gym.Env):
         self.circuit_dag = circuit_to_dag(self.circuit)
 
         o = self._encode_circuit_dag(self.circuit_dag)
-        return o, {}
+        i = self._get_info()
+
+        return o, i
+
+    def _compute_reward(action, state, new_state):
+        # TODO
+        return -(new_state.depth() - state.depth())
 
     def step(self, action):
-        pass
+        action = self._action_type_to_class[action]
+
+        new_circuit_dag = action.run(self.circuit_dag)
+        o = self._encode_circuit_dag(new_circuit_dag)
+        r = self._compute_reward(action, self.circuit_dag, new_circuit_dag)
+        i = self._get_info()
+        terminated = False
+
+        self.circuit_dag = new_circuit_dag
+        return o, r, terminated, i
