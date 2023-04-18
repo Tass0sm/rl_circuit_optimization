@@ -1,18 +1,23 @@
+import numpy as np
 import gymnasium as gym
 
 from enum import Enum
 from ray.rllib.env.env_context import EnvContext
 from gymnasium.spaces import Discrete, Graph, GraphInstance
 
-from qiskit.circuit.random import random_circuit
 from qiskit.dagcircuit import DAGOpNode
+from qiskit.circuit.random import random_circuit
+from qiskit.compiler.transpiler import transpile
+from qiskit.transpiler.passmanager import PassManager
 from qiskit.converters.circuit_to_dag import circuit_to_dag
 from qiskit.transpiler.passes.optimization.commutative_cancellation import CommutativeCancellation
 
-BASIS_GATES=["u", "id", "csx", "measure"]
-CIRCUIT_TRANSFORMATIONS=[CommutativeCancellation]
+BASIS_GATES=["u", "cx", "id", "measure"]
+TRANSPILER_PASSES=[
+    CommutativeCancellation()
+]
 
-class QuantumCircuit(gym.Env):
+class QuantumCircuitEnv(gym.Env):
     """RL environment for quantum circuits.
 
     Observation Space:
@@ -41,8 +46,8 @@ class QuantumCircuit(gym.Env):
         self._gate_type_to_name = dict(zip(BASIS_GATES, range(num_basis_gates)))
         self.observation_space = Graph(node_space=gate_space, edge_space=edge_space)
 
-        num_transformations = len(CIRCUIT_TRANSFORMATIONS)
-        self._action_type_to_class = dict(zip(range(num_transformations), CIRCUIT_TRANSFORMATIONS))
+        num_transformations = len(TRANSPILER_PASSES)
+        self._action_type_to_transpiler_pass = dict(zip(range(num_transformations), TRANSPILER_PASSES))
         self.action_space = Discrete(num_transformations)
 
     def _encode_circuit_dag(self, circuit_dag):
@@ -58,48 +63,54 @@ class QuantumCircuit(gym.Env):
             s1 = set(e[0].qargs)
             s2 = set(e[1].qargs)
             qubit = s1.intersection(s2).pop()
-            return circuit.find_bit(qubit).index
+            return self._circuit.find_bit(qubit).index
 
         edge_wires = list(map(get_edge_wire, edges))
 
-        return {
-            "nodes": op_node_types,
-            "edges": edge_wires,
-            "edge_links": index_edges
-        }
+        return GraphInstance(nodes=np.array(op_node_types),
+                             edges=np.array(edge_wires),
+                             edge_links=np.array(index_edges))
 
     def _get_info(self):
         # TODO
         return {}
 
     def reset(self, *, seed=None, options=None):
-        "Starts a new episode by randomly generating a new circuit. Returns the
+        """
+        Starts a new episode by randomly generating a new circuit. Returns the
         first agent observation, which is the circuit dag encoded as a member of
-        the observation space. Also returns metrics (TODO)"
+        the observation space. Also returns metrics (TODO)
+        """
 
         # We need the following line to seed self.np_random
         super().reset(seed=seed)
 
-        self.circuit = random_circuit(2, 2, measure=True)
-        self.circuit_dag = circuit_to_dag(self.circuit)
+        c = random_circuit(2, 2, measure=True)
+        c = transpile(c, basis_gates=BASIS_GATES, optimization_level=0)
+        self._circuit = c
+        self._circuit_dag = circuit_to_dag(self._circuit)
 
-        o = self._encode_circuit_dag(self.circuit_dag)
+        o = self._encode_circuit_dag(self._circuit_dag)
         i = self._get_info()
 
         return o, i
 
-    def _compute_reward(action, state, new_state):
+    def _compute_reward(self, action, state, new_state):
         # TODO
         return -(new_state.depth() - state.depth())
 
     def step(self, action):
-        action = self._action_type_to_class[action]
+        p = self._action_type_to_transpiler_pass[action]
+        pm = PassManager(p)
 
-        new_circuit_dag = action.run(self.circuit_dag)
+        new_circuit = pm.run(self._circuit)
+        new_circuit_dag = circuit_to_dag(new_circuit)
+
         o = self._encode_circuit_dag(new_circuit_dag)
-        r = self._compute_reward(action, self.circuit_dag, new_circuit_dag)
+        r = self._compute_reward(action, self._circuit_dag, new_circuit_dag)
         i = self._get_info()
         terminated = False
 
-        self.circuit_dag = new_circuit_dag
-        return o, r, terminated, i
+        self._circuit = new_circuit
+        self._circuit_dag = new_circuit_dag
+        return o, r, terminated, False, i
