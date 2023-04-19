@@ -10,11 +10,58 @@ from qiskit.circuit.random import random_circuit
 from qiskit.compiler.transpiler import transpile
 from qiskit.transpiler.passmanager import PassManager
 from qiskit.converters.circuit_to_dag import circuit_to_dag
-from qiskit.transpiler.passes.optimization.commutative_cancellation import CommutativeCancellation
+from qiskit.transpiler.passes.optimization import (
+    Optimize1qGates,
+    Optimize1qGatesDecomposition,
+    Collect2qBlocks,
+    CollectMultiQBlocks,
+    ConsolidateBlocks,
+    CommutationAnalysis,
+    CommutativeCancellation,
+    CommutativeInverseCancellation,
+    CXCancellation,
+    Optimize1qGatesSimpleCommutation,
+    OptimizeSwapBeforeMeasure,
+    RemoveResetInZeroState,
+    RemoveDiagonalGatesBeforeMeasure,
+    CrosstalkAdaptiveSchedule,
+    HoareOptimizer,
+    TemplateOptimization,
+    InverseCancellation,
+    Collect1qRuns,
+    EchoRZXWeylDecomposition,
+    CollectLinearFunctions,
+    ResetAfterMeasureSimplification,
+    OptimizeCliffords,
+    CollectCliffords
+)
 
-BASIS_GATES=["u", "cx", "id", "measure"]
+BASIS_GATES=["u", "u1", "u2", "u3", "cx", "id", "measure"]
 TRANSPILER_PASSES=[
-    CommutativeCancellation()
+    Optimize1qGates(),
+    Optimize1qGatesDecomposition(),
+    Collect2qBlocks(),
+    CollectMultiQBlocks(),
+    ConsolidateBlocks(),
+    CommutationAnalysis(),
+    CommutativeCancellation(),
+    CommutativeInverseCancellation(),
+    CXCancellation(),
+    Optimize1qGatesSimpleCommutation(),
+    OptimizeSwapBeforeMeasure(),
+    RemoveResetInZeroState(),
+    RemoveDiagonalGatesBeforeMeasure(),
+    # Require's backend information:
+    # CrosstalkAdaptiveSchedule(),
+    HoareOptimizer(),
+    TemplateOptimization(),
+    # InverseCancellation(),
+    Collect1qRuns(),
+    # EchoRZXWeylDecomposition(),
+    CollectLinearFunctions(),
+    ResetAfterMeasureSimplification(),
+    OptimizeCliffords(),
+    CollectCliffords()
 ]
 
 class QuantumCircuitEnv(gym.Env):
@@ -36,13 +83,14 @@ class QuantumCircuitEnv(gym.Env):
         # Z-Rotation, Phased-X and Controlled-Not (CNOT) gates.
         # gate_space = Discrete(3)
         # gate_space = Box(low=-100, high=100, shape=(3,))
+        self._width = 2
         self._depth = 2
 
         num_basis_gates = len(BASIS_GATES)
         # an identifier for any item in the graph
         gate_space = Discrete(num_basis_gates)
         # a binary label for to distinguish wires coming into a two-qubit gate
-        edge_space = Discrete(self._depth)
+        edge_space = Discrete(self._width)
         self._gate_type_to_name = dict(zip(BASIS_GATES, range(num_basis_gates)))
         self.observation_space = Graph(node_space=gate_space, edge_space=edge_space)
 
@@ -72,8 +120,11 @@ class QuantumCircuitEnv(gym.Env):
                              edge_links=np.array(index_edges))
 
     def _get_info(self):
-        # TODO
-        return {}
+        # TODO: add more
+        return {
+            "dag_size": self._circuit_dag.size(),
+            "depth": self._circuit.depth()
+        }
 
     def reset(self, *, seed=None, options=None):
         """
@@ -87,8 +138,11 @@ class QuantumCircuitEnv(gym.Env):
 
         c = random_circuit(2, 2, measure=True)
         c = transpile(c, basis_gates=BASIS_GATES, optimization_level=0)
+
         self._circuit = c
         self._circuit_dag = circuit_to_dag(self._circuit)
+
+        print(self._circuit_dag)
 
         o = self._encode_circuit_dag(self._circuit_dag)
         i = self._get_info()
@@ -108,9 +162,9 @@ class QuantumCircuitEnv(gym.Env):
 
         o = self._encode_circuit_dag(new_circuit_dag)
         r = self._compute_reward(action, self._circuit_dag, new_circuit_dag)
-        i = self._get_info()
         terminated = False
 
         self._circuit = new_circuit
         self._circuit_dag = new_circuit_dag
+        i = self._get_info()
         return o, r, terminated, False, i

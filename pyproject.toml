@@ -11,6 +11,8 @@ python = ">=3.10,<3.12"
 ray = {extras = ["rllib"], version = "^2.3.1"}
 torch = "^2.0.0"
 qiskit = "^0.42.1"
+protobuf = "^3.20"
+z3-solver = "^4.12.1.0"
 
 
 [build-system]
